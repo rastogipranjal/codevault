@@ -1,36 +1,61 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { signInWithPopup, onAuthStateChanged, GithubAuthProvider } from 'firebase/auth'
+import { auth, githubProvider } from '../firebase'
 import { authApi } from '../api/client'
 
 const LoginPage = () => {
   const navigate = useNavigate()
   const [checkingAuth, setCheckingAuth] = useState(true)
+  const [isSigningIn, setIsSigningIn] = useState(false)
+  const [authError, setAuthError] = useState('')
 
   useEffect(() => {
-    let isMounted = true
-
-    const checkAuth = async () => {
-      try {
-        await authApi.getCurrentUser()
-        if (isMounted) {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        navigate('/dashboard', { replace: true })
+      } else {
+        try {
+          await authApi.getCurrentUser()
           navigate('/dashboard', { replace: true })
-        }
-      } catch {
-        if (isMounted) {
+        } catch {
           setCheckingAuth(false)
         }
       }
-    }
+    })
 
-    checkAuth()
-
-    return () => {
-      isMounted = false
-    }
+    return () => unsubscribe()
   }, [navigate])
 
-  const handleGithubLogin = () => {
-    window.location.href = authApi.getGithubLoginUrl()
+  const handleGithubLogin = async () => {
+    try {
+      setIsSigningIn(true)
+      setAuthError('')
+
+      const result = await signInWithPopup(auth, githubProvider)
+      const credential = GithubAuthProvider.credentialFromResult(result)
+      const token = credential?.accessToken
+
+      if (token) {
+        localStorage.setItem('codevault_github_token', token)
+      }
+
+      const userData = {
+        uid: result.user.uid,
+        username: result.user.reloadUserInfo?.screenName || result.user.displayName || 'Coder',
+        email: result.user.email,
+        avatarUrl: result.user.photoURL
+      }
+      localStorage.setItem('codevault_firebase_user', JSON.stringify(userData))
+
+      navigate('/dashboard', { replace: true })
+    } catch (err) {
+      console.error('Firebase GitHub sign in error:', err)
+      if (err.code !== 'auth/popup-closed-by-user') {
+        setAuthError(err.message || 'Failed to sign in with GitHub')
+      }
+      setIsSigningIn(false)
+    }
   }
 
   if (checkingAuth) {
@@ -105,12 +130,25 @@ const LoginPage = () => {
 
             <button
               type="button"
+              disabled={isSigningIn}
               onClick={handleGithubLogin}
-              className="glow-login-btn group flex w-full items-center justify-center gap-3 rounded-md bg-gradient-to-r from-violet-600 to-cyan-500 px-6 py-4 text-lg font-bold text-white transition-all hover:scale-[1.02]"
+              className="glow-login-btn group flex w-full items-center justify-center gap-3 rounded-md bg-gradient-to-r from-violet-600 to-cyan-500 px-6 py-4 text-lg font-bold text-white transition-all hover:scale-[1.02] disabled:opacity-60"
             >
-              <span>Sign in with GitHub</span>
-              <span className="material-symbols-outlined transition-transform group-hover:translate-x-1">arrow_forward</span>
+              {isSigningIn ? (
+                <span>Signing in with GitHub...</span>
+              ) : (
+                <>
+                  <span>Sign in with GitHub</span>
+                  <span className="material-symbols-outlined transition-transform group-hover:translate-x-1">arrow_forward</span>
+                </>
+              )}
             </button>
+
+            {authError && (
+              <div className="mt-4 w-full rounded-md border border-rose-500/30 bg-rose-500/10 px-4 py-2.5 text-center text-sm text-rose-300">
+                {authError}
+              </div>
+            )}
           </div>
 
           <div className="mt-12 text-center text-xs leading-relaxed text-slate-400/70">

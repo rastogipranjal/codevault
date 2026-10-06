@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { authApi, syncApi } from '../api/client'
+import { auth } from '../firebase'
 import AppTopNav from '../components/common/AppTopNav'
 
 const getDifficultyClasses = (difficulty) => {
@@ -36,15 +37,44 @@ const DashboardPage = () => {
   const pageSize = 10
 
   useEffect(() => {
+    let isMounted = true
+
     const loadDashboardData = async () => {
       try {
         setIsLoading(true)
-        const [currentUser, submissions] = await Promise.all([
-          authApi.getCurrentUser(),
-          syncApi.getLatestSubmissions()
-        ])
 
-        setUser(currentUser)
+        let currentUser = null
+        try {
+          currentUser = await authApi.getCurrentUser()
+        } catch {
+          const cached = localStorage.getItem('codevault_firebase_user')
+          if (cached) {
+            currentUser = JSON.parse(cached)
+          } else if (auth.currentUser) {
+            currentUser = {
+              username: auth.currentUser.reloadUserInfo?.screenName || auth.currentUser.displayName || 'Coder',
+              email: auth.currentUser.email,
+              avatarUrl: auth.currentUser.photoURL
+            }
+          }
+        }
+
+        if (!currentUser) {
+          if (isMounted) navigate('/login')
+          return
+        }
+
+        if (isMounted) setUser(currentUser)
+
+        let submissions = []
+        try {
+          submissions = await syncApi.getLatestSubmissions()
+        } catch (syncErr) {
+          console.warn('Backend sync API unavailable:', syncErr)
+          submissions = []
+        }
+
+        if (!isMounted) return
 
         const mapped = submissions.map((item) => {
           const mappedStatus = item.status === 'COMPLETED' ? 'Solved' : item.status === 'FAILED' ? 'Review' : 'To-Do'
@@ -62,14 +92,19 @@ const DashboardPage = () => {
         })
 
         setRows(mapped)
-      } catch {
-        navigate('/login')
+      } catch (err) {
+        console.error('Error loading dashboard:', err)
+        if (isMounted) navigate('/login')
       } finally {
-        setIsLoading(false)
+        if (isMounted) setIsLoading(false)
       }
     }
 
     loadDashboardData()
+
+    return () => {
+      isMounted = false
+    }
   }, [navigate])
 
   useEffect(() => {
@@ -134,8 +169,13 @@ const DashboardPage = () => {
 
   const handleLogout = async () => {
     try {
+      await auth.signOut()
       await authApi.logout()
+    } catch (e) {
+      console.warn('Logout error:', e)
     } finally {
+      localStorage.removeItem('codevault_github_token')
+      localStorage.removeItem('codevault_firebase_user')
       navigate('/login')
     }
   }
