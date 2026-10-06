@@ -1,0 +1,5 @@
+{
+  "terminal.integrated.env.windows": {
+    "PATH": "C:\\Users\\hp\\AppData\\Local\\Programs\\nodejs;${env:PATH}"
+  }
+}
